@@ -12,8 +12,12 @@ LastEditTime: 2021-03-13 11:37:15
 import random
 
 class ReplayBuffer:
-    
+
     def __init__(self, capacity):
+        """
+        用于保存和抽样提取保存的数据
+        :param capacity: buffer的容量
+        """
         self.capacity = capacity
         self.buffer = []
         self.position = 0
