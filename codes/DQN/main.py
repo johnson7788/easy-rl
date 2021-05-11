@@ -18,6 +18,7 @@ from DQN.agent import DQN
 from common.plot import plot_rewards
 from common.utils import save_results
 import wandb
+import os
 
 SEQUENCE = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") # 获取当前时间
 SAVED_MODEL_PATH = os.path.split(os.path.abspath(__file__))[0]+"/saved_model/"+SEQUENCE+'/' # 生成保存的模型路径
@@ -49,7 +50,15 @@ class DQNConfig:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # 检测gpu
         self.hidden_dim = 128 # 神经网络隐藏层维度
  
-def train(cfg,env,agent):
+def train(cfg,env,agent, display=False):
+    """
+    开始训练
+    :param cfg:
+    :param env:
+    :param agent:
+    :param display: 是否显示界面
+    :return:
+    """
     print('开始训练:')
     # 观察模型参数变化
     wandb.watch(agent.policy_net)
@@ -59,6 +68,9 @@ def train(cfg,env,agent):
     ma_rewards = [] # 滑动平均的reward
     ep_steps = []
     for i_episode in range(cfg.train_eps):
+        if display:
+            # 显示图像界面
+            env.render()
         state = env.reset() # reset环境状态
         ep_reward = 0  #这一个回合的奖励
         for i_step in range(cfg.train_steps):
@@ -66,36 +78,35 @@ def train(cfg,env,agent):
             next_state, reward, done, _ = env.step(action) # 更新环境参数, 返回当前状态，奖励，是否结束 eg: next_state: [ 0.03076804 -0.19321569 -0.03151444  0.25146705]
             ep_reward += reward
             agent.memory.push(state, action, reward, next_state, done) # 将state等这些transition存入memory
+            wandb.log({"i_step": i_step, "action": action, "step reward": reward, "episode done": 1 if done else 0})
             state = next_state # 跳转到下一个状态
             agent.update() # 每步更新网络, 如果小于一个batch_size的时候就不会更新
-            wandb.log({"i_step:episode Step": i_step, "this step action": action, "this step reward": reward, "episode done": 1 if done else 0})
             if done:
                 break
         # 更新target network，复制DQN中的所有weights and biases
         if i_episode % cfg.target_update == 0:
             agent.target_net.load_state_dict(agent.policy_net.state_dict())
-        print('Episode:{}/{}, Reward:{}, Steps:{}, Done:{}'.format(i_episode+1,cfg.train_eps,ep_reward,i_step+1,done))
+        print('Episode:{}/{}, Reward:{}, Steps:{}, Done:{}'.format(i_episode+1,cfg.train_eps,ep_reward,i_step,done))
         ep_steps.append(i_step)
         rewards.append(ep_reward)
         # 计算滑动窗口的reward
         if ma_rewards:
-            ma_rewards.append(
-                0.9*ma_rewards[-1]+0.1*ep_reward)
+            ep_reward = 0.9*ma_rewards[-1]+0.1*ep_reward
+            ma_rewards.append(ep_reward)
         else:
             ma_rewards.append(ep_reward)
-        wandb.log({"episode_num":"i_episode","episode reward": ep_reward, "滑动平均奖励": ma_rewards})
+        wandb.log({"episode_num": int(i_episode), "episode reward": ep_reward})
     print('Complete training！')
     return rewards,ma_rewards
 
 if __name__ == "__main__":
     #绘图
-    wandb.init(project="DQN")
+    wandb.init(project="DQN", mode="disabled")
     config = wandb.config
-
     cfg = DQNConfig()
     env = gym.make('CartPole-v0').unwrapped # 可google为什么unwrapped gym，此处一般不需要
     env.seed(1) # 设置env随机种子
-    # eg: n_states:4, 包含4个状态
+    # eg: n_states:4, 包含4个状态数值，在之间
     n_states = env.observation_space.shape[0]
     #eg: n_actions 包含2个动作
     n_actions = env.action_space.n

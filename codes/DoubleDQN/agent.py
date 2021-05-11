@@ -22,6 +22,8 @@ import math
 import numpy as np
 from common.memory import ReplayBuffer
 from common.model import MLP2
+import wandb
+
 class DoubleDQN:
     def __init__(self, n_states, n_actions, cfg):
         
@@ -45,11 +47,15 @@ class DoubleDQN:
         self.memory = ReplayBuffer(cfg.memory_capacity)
 
     def choose_action(self, state):
-        '''选择动作
-        '''
+        """
+        选择动作
+        :param state: eg: [ 0.03073904  0.00145001 -0.03088818 -0.03131252]
+        :return:
+        """
         self.epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
             math.exp(-1. * self.actions_count / self.epsilon_decay)
         self.actions_count += 1
+        # 保持随机探索或最优动作
         if random.random() > self.epsilon:
             with torch.no_grad():
                 # 先转为张量便于丢给神经网络,state元素数据原本为float64
@@ -99,12 +105,12 @@ class DoubleDQN:
         q_target = reward_batch + self.gamma * next_q_state_value * (1-done_batch[0])
         '''
         '''以下是Double DQN q_target计算方式，与NatureDQN稍有不同'''
-        next_target_values = self.target_net(
-            next_state_batch)
+        next_target_values = self.target_net(next_state_batch)
         # 选出Q(s_t‘, a)对应的action，代入到next_target_values获得target net对应的next_q_value，即Q’(s_t|a=argmax Q(s_t‘, a))
         next_target_q_value = next_target_values.gather(1, torch.max(next_q_values, 1)[1].unsqueeze(1)).squeeze(1)
-        q_target = reward_batch + self.gamma * next_target_q_value * (1-done_batch[0])
-        self.loss = nn.MSELoss()(q_value, q_target.unsqueeze(1))  # 计算 均方误差loss
+        wandb.log({"next_target_q_value_shape": next_target_q_value.shape[0]})
+        expected_q_values = reward_batch + self.gamma * next_target_q_value * (1-done_batch[0])
+        self.loss = nn.MSELoss()(q_value, expected_q_values.unsqueeze(1))  # 计算 均方误差loss
         # 优化模型
         self.optimizer.zero_grad()  # zero_grad清除上一步所有旧的gradients from the last step
         # loss.backward()使用backpropagation计算loss相对于所有parameters(需要gradients)的微分

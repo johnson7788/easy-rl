@@ -21,6 +21,8 @@ import math
 import numpy as np
 from common.memory import ReplayBuffer
 from common.model import MLP2
+import wandb
+
 class DQN:
     def __init__(self, n_states, n_actions, cfg):
         
@@ -108,12 +110,12 @@ class DQN:
         q_values0 = self.policy_net(state_batch) # 前向计算, shape [batch_size, action_num],   eg:torch.Size([64, 2])
         q_values = q_values0.gather(dim=1, index=action_batch)  # index表示当采取这个action时，这个对应的位置的采取的action的概率
         # 计算所有next states的V(s_{t+1})，即通过target_net中选取reward最大的对应states
-        next_q_value = self.target_net(next_state_batch)  # 目标网络获取的下一个state对应的action值的概率, [batch_size, action_num],
-        next_state_values = next_q_value.max(1)[0].detach()  # 比如tensor([ 0.0060, -0.0171,...,]), (batch_size,) 获取最大的那个action的概率
+        next_target_values = self.target_net(next_state_batch)  # 目标网络获取的下一个state对应的action值的概率, [batch_size, action_num],
+        next_state_values = next_target_values.max(1)[0].detach()  # 比如tensor([ 0.0060, -0.0171,...,]), (batch_size,) 获取最大的那个action的概率
+        wandb.log({"next_state_values_shape": next_state_values.shape[0]})
         # 计算 expected_q_value， 核心计算Q值公式，奖励+折扣因子*max(), done_batch[0]是表示是否结束了，这个batch的第一个元素
         # 对于终止状态，此时done_batch[0]=1, 对应的expected_q_value等于reward， reward_batch, next_state_values,（batch_size,)
-        expected_q_values = reward_batch + self.gamma * \
-            next_state_values * (1-done_batch[0])  # 得到的形状 shape (batch_size,)
+        expected_q_values = reward_batch + self.gamma * next_state_values * (1-done_batch[0])  # 得到的形状 shape (batch_size,)
         # self.loss = F.smooth_l1_loss(q_values,expected_q_values.unsqueeze(1)) # 计算 Huber loss
         self.loss = nn.MSELoss()(q_values, expected_q_values.unsqueeze(1))  # 计算policy网络和target网络的价值函数的不同，计算损失 均方误差loss
         # 优化模型

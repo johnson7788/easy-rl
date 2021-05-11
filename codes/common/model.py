@@ -34,7 +34,7 @@ class MLP2(nn.Module):
 class Critic(nn.Module):
     def __init__(self, n_obs, n_actions, hidden_size, init_w=3e-3):
         super(Critic, self).__init__()
-        
+        # 输入维度是n_obs的个数+n_actions的个数，输出是一个浮点值,因为是判别者，所以需要把动作输入的动作和观察的状态都输入过来，然后打一个分
         self.linear1 = nn.Linear(n_obs + n_actions, hidden_size)
         self.linear2 = nn.Linear(hidden_size, hidden_size)
         self.linear3 = nn.Linear(hidden_size, 1)
@@ -52,6 +52,13 @@ class Critic(nn.Module):
 
 class Actor(nn.Module):
     def __init__(self, n_obs, n_actions, hidden_size, init_w=3e-3):
+        """
+        行动者，根据状态，输出一个动作
+        :param n_obs:
+        :param n_actions:
+        :param hidden_size:
+        :param init_w:
+        """
         super(Actor, self).__init__()  
         self.linear1 = nn.Linear(n_obs, hidden_size)
         self.linear2 = nn.Linear(hidden_size, hidden_size)

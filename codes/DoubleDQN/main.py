@@ -10,13 +10,14 @@ LastEditTime: 2021-03-17 20:11:19
 @Environment: python 3.7.7
 '''
 import sys,os
-sys.path.append(os.getcwd()) # add current terminal path
+sys.path.append(os.getcwd()) # 添加当前终端路径
 import gym
 import torch
 import datetime
 from DoubleDQN.agent import DoubleDQN
 from common.plot import plot_rewards
 from common.utils import save_results
+import wandb
 
 SEQUENCE = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") # 获取当前时间
 SAVED_MODEL_PATH = os.path.split(os.path.abspath(__file__))[0]+"/saved_model/"+SEQUENCE+'/' # 生成保存的模型路径
@@ -36,33 +37,49 @@ class DoubleDQNConfig:
         self.gamma = 0.99
         self.epsilon_start = 0.9 # e-greedy策略的初始epsilon
         self.epsilon_end = 0.01
-        self.epsilon_decay = 200
+        self.epsilon_decay = 200   #每多少步之后开始衰减
         self.lr = 0.01 # 学习率
         self.memory_capacity = 10000 # Replay Memory容量
         self.batch_size = 128
         self.train_eps = 250 # 训练的episode数目
-        self.train_steps = 200 # 训练每个episode的最大长度
+        self.train_steps = 200 # 训练每个episode的训练多少个step
         self.target_update = 2 # target net的更新频率
         self.eval_eps = 20 # 测试的episode数目
         self.eval_steps = 200 # 测试每个episode的最大长度
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # 检测gpu
         self.hidden_dim = 128 # 神经网络隐藏层维度
- 
 
-def train(cfg,env,agent):
-    print('Start to train !')
-    rewards,ma_rewards = [],[]
+def train(cfg,env,agent, display=False):
+    """
+    开始训练
+    :param cfg:
+    :param env:
+    :param agent:
+    :param display: 是否显示界面
+    :return:
+    """
+    print('开始训练:')
+    # 观察模型参数变化
+    wandb.watch(agent.policy_net)
+    wandb.watch(agent.target_net)
+    #保存每个episode的rewards
+    rewards = []
+    ma_rewards = [] # 滑动平均的reward
     ep_steps = []
     for i_episode in range(cfg.train_eps):
+        if display:
+            # 显示图像界面
+            env.render()
         state = env.reset() # reset环境状态
-        ep_reward = 0
+        ep_reward = 0  #这一个回合的奖励
         for i_step in range(cfg.train_steps):
-            action = agent.choose_action(state) # 根据当前环境state选择action
-            next_state, reward, done, _ = env.step(action) # 更新环境参数
+            action = agent.choose_action(state) # 根据当前环境state选择action, int, eg: 0
+            next_state, reward, done, _ = env.step(action) # 更新环境参数, 返回当前状态，奖励，是否结束 eg: next_state: [ 0.03076804 -0.19321569 -0.03151444  0.25146705]
             ep_reward += reward
             agent.memory.push(state, action, reward, next_state, done) # 将state等这些transition存入memory
+            wandb.log({"i_step": i_step, "action": action, "step reward": reward, "episode done": 1 if done else 0})
             state = next_state # 跳转到下一个状态
-            agent.update() # 每步更新网络
+            agent.update() # 每步更新网络, 如果小于一个batch_size的时候就不会更新
             if done:
                 break
         # 更新target network，复制DQN中的所有weights and biases
@@ -73,21 +90,27 @@ def train(cfg,env,agent):
         rewards.append(ep_reward)
         # 计算滑动窗口的reward
         if ma_rewards:
-            ma_rewards.append(
-                0.9*ma_rewards[-1]+0.1*ep_reward)
+            ep_reward = 0.9*ma_rewards[-1]+0.1*ep_reward
+            ma_rewards.append(ep_reward)
         else:
-            ma_rewards.append(ep_reward)   
+            ma_rewards.append(ep_reward)
+        wandb.log({"episode_num": int(i_episode), "episode reward": ep_reward})
     print('Complete training！')
     return rewards,ma_rewards
-    
+
 if __name__ == "__main__":
+    wandb.init(project="DoubleDQN")
+    config = wandb.config
     cfg = DoubleDQNConfig()
     env = gym.make('CartPole-v0').unwrapped # 可google为什么unwrapped gym，此处一般不需要
     env.seed(1) # 设置env随机种子
+    # eg: n_states:4, 包含4个状态
     n_states = env.observation_space.shape[0]
+    #eg: n_actions 包含2个动作
     n_actions = env.action_space.n
     agent = DoubleDQN(n_states,n_actions,cfg)
     rewards,ma_rewards = train(cfg,env,agent)
+    # 保存模型
     agent.save(path=SAVED_MODEL_PATH)
     save_results(rewards,ma_rewards,tag='train',path=RESULT_PATH)
     plot_rewards(rewards,ma_rewards,tag="train",algo = cfg.algo,path=RESULT_PATH)

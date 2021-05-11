@@ -16,7 +16,7 @@ import torch.optim as optim
 
 from common.model import Actor, Critic
 from common.memory import ReplayBuffer
-
+import wandb
 
 class DDPG:
     def __init__(self, n_states, n_actions, cfg):
@@ -25,7 +25,7 @@ class DDPG:
         self.actor = Actor(n_states, n_actions, cfg.hidden_dim).to(cfg.device)
         self.target_critic = Critic(n_states, n_actions, cfg.hidden_dim).to(cfg.device)
         self.target_actor = Actor(n_states, n_actions, cfg.hidden_dim).to(cfg.device)
-
+        # 最开始，让4个网络中对应的Actor和Critic网络的参数保持相同
         for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
@@ -43,7 +43,8 @@ class DDPG:
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         action = self.actor(state)
         # torch.detach()用于切断反向传播
-        return action.detach().cpu().numpy()[0, 0]
+        action_value = action.detach().cpu().numpy()[0, 0]
+        return action_value
 
     def update(self):
         if len(self.memory) < self.batch_size:
@@ -56,11 +57,12 @@ class DDPG:
         action = torch.FloatTensor(action).to(self.device)
         reward = torch.FloatTensor(reward).unsqueeze(1).to(self.device)
         done = torch.FloatTensor(np.float32(done)).unsqueeze(1).to(self.device)
-        # 注意critic将(s_t,a)作为输入
-        policy_loss = self.critic(state, self.actor(state))
-        
+        # 注意critic将(s_t,a)作为输入, 将当前的状态和actor决定的动作作为参数，传给critic，critic决定判断好坏
+        actor_action = self.actor(state)    # shape (batch_size,)
+        policy_loss = self.critic(state, actor_action)   #shape (batch_size)
+        #
         policy_loss = -policy_loss.mean()
-
+        # next_state , shape, [batch_size, state_num] torch.Size([128, 3]), 目标网络，用于Q网络参数
         next_action = self.target_actor(next_state)
         target_value = self.target_critic(next_state, next_action.detach())
         expected_value = reward + (1.0 - done) * self.gamma * target_value

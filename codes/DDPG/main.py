@@ -19,6 +19,7 @@ from DDPG.agent import DDPG
 from DDPG.env import NormalizedActions,OUNoise
 from common.plot import plot_rewards
 from common.utils import save_results
+import wandb
 
 SEQUENCE = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") # 获取当前时间
 SAVED_MODEL_PATH = os.path.split(os.path.abspath(__file__))[0]+"/saved_model/"+SEQUENCE+'/' # 生成保存的模型路径
@@ -49,7 +50,7 @@ class DDPGConfig:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def train(cfg,env,agent):
     print('Start to train ! ')
-    ou_noise = OUNoise(env.action_space) # action noise
+    ou_noise = OUNoise(env.action_space) # action noise，给行动加噪音
     rewards = []
     ma_rewards = [] # moving average rewards
     ep_steps = []
@@ -59,15 +60,18 @@ def train(cfg,env,agent):
         ep_reward = 0
         for i_step in range(cfg.train_steps):
             action = agent.choose_action(state)
-            action = ou_noise.get_action(
-                action, i_step)  # 即paper中的random process
+            wandb.log({"action":action})
+            action = ou_noise.get_action(action, i_step)  # 即paper中的random process
+            wandb.log({"noise_action": action})
             next_state, reward, done, _ = env.step(action)
             ep_reward += reward
+            wandb.log({"i_step":"i_step","reward": reward, "ep_reward_step":ep_reward, "done": int(done is True)})
             agent.memory.push(state, action, reward, next_state, done)
             agent.update()
             state = next_state
             if done:
                 break
+        wandb.log({"i_episode":i_episode, "ep_reward":ep_reward, "i_step_episode":i_step})
         print('Episode:{}/{}, Reward:{}, Steps:{}, Done:{}'.format(i_episode+1,cfg.train_eps,ep_reward,i_step+1,done))
         ep_steps.append(i_step)
         rewards.append(ep_reward)
@@ -79,11 +83,14 @@ def train(cfg,env,agent):
     return rewards,ma_rewards
 
 if __name__ == "__main__":
+    #绘图
+    wandb.init(project="DDPG")
+    config = wandb.config
     cfg = DDPGConfig()
     env = NormalizedActions(gym.make("Pendulum-v0"))
     env.seed(1) # 设置env随机种子
-    n_states = env.observation_space.shape[0]
-    n_actions = env.action_space.shape[0]
+    n_states = env.observation_space.shape[0]   #3个状态数值，在-8.0到8.0之间
+    n_actions = env.action_space.shape[0]      #1个动作，是连续动作，值是-2.0到2.0之间
     agent = DDPG(n_states,n_actions,cfg)
     rewards,ma_rewards = train(cfg,env,agent)
     agent.save(path=SAVED_MODEL_PATH)
